@@ -25,14 +25,26 @@ void prefetch_with_compute(
 	float accumulator = 0.0f;
 
 #ifdef PREFETCH_REGISTER // prefetch into register
-	float current = x[index];
+	float current;
 	float next;
 
-	// Do not make the compiler unroll this.
+	const float* current_ptr = x + index;
+	asm volatile(
+		"ld.global.f32 %0, [%1];"
+		: "=f"(current)
+		: "l"(current_ptr)
+	);
+
 	#pragma unroll 1
 	for (int i = 0; i < iterations; ++i) {
 		if (i + 1 < iterations) {
-			next = x[index + (i + 1) * WARP_SIZE];
+			const float* next_ptr =
+				x + index + (i + 1) * WARP_SIZE;
+			asm volatile(
+				"ld.global.f32 %0, [%1];"
+				: "=f"(next)
+				: "l"(next_ptr)
+			);
 		}
 
 		#pragma unroll
@@ -52,14 +64,20 @@ void prefetch_with_compute(
 		if (i + 1 < iterations) {
 			const float* next_ptr =
 				x + index + (i + 1) * WARP_SIZE;
-
 			asm volatile(
 				"prefetch.global.L1 [%0];"
 				:
 				: "l"(next_ptr));
 		}
 
-		float current = x[index + i * WARP_SIZE];
+		const float* current_ptr =
+			x + index + i * WARP_SIZE;
+		float current;
+		asm volatile(
+			"ld.global.f32 %0, [%1];"
+			: "=f"(current)
+			: "l"(current_ptr)
+		);
 
 		#pragma unroll
 		for (int k = 0; k < COMPUTE_STEPS; ++k) {
@@ -69,18 +87,24 @@ void prefetch_with_compute(
 		accumulator += current;
 	}
 #else // don't prefetch
-	// Do not make the compiler unroll this.
 	#pragma unroll 1
 	for (int i = 0; i < iterations; ++i) {
-		int ii = index + i * WARP_SIZE;
-		float t = x[ii];
+		const float* current_ptr =
+			x + index + i * WARP_SIZE;
+
+		float current;
+		asm volatile(
+			"ld.global.f32 %0, [%1];"
+			: "=f"(current)
+			: "l"(current_ptr)
+		);
 
 		#pragma unroll
 		for (int k = 0; k < COMPUTE_STEPS; ++k) {
-			t = t * 1.000001f + 0.000001f;
+			current = current * 1.000001f + 0.000001f;
 		}
 
-		accumulator += t;
+		accumulator += current;
 	}
 #endif
 
